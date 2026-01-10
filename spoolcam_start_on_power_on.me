@@ -1,0 +1,58 @@
+Should the raspberry pi need to be re-imaged/re-flashed after making the Python code file go through these steps.
+
+1. Final assumptions (important)
+-Script path: /home/arespi/fast_gpio.py
+-videos saved to: /home/arespi/spoolvids/
+
+2. Ensure directories & permissions
+-Run once (in bash):
+mkdir -p /home/arespi/spoolvids
+chmod 755 /home/arespi/spoolvids
+
+-> Make the script executable (no response is expected): chmod +x /home/arespi/fast_gpio.py
+
+3. Create the systemd service
+-create the service file (in bash):
+sudo nano /etc/systemd/system/spoolcam.service
+
+-once made paste exactly this:
+[Unit]
+Description=Spool Motion Recorder (MJPEG, GPIO-triggered)
+After=multi-user.target
+
+[Service]
+Type=simple
+User=arespi
+WorkingDirectory=/home/arespi
+ExecStart=/usr/bin/python3 /home/arespi/fast_gpio.py
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
+4. Enable & start the service
+-Run (in bash):
+sudo systemctl daemon-reload
+sudo systemctl enable spoolcam.service
+sudo systemctl start spoolcam.service
+
+5. Verify it is running
+-Run (in bash):
+sudo systemctl status spoolcam.service
+
+-> To stop manually run (in bash): sudo systemctl stop spoolcam.service this
+-> This will stop the program for not, but will not interfere with the code from starting once it gets powered on again.
+
+6.
+-Reboot (in bash):
+sudo reboot
+
+-ssh back into the raspberry pi and either check the spoolvids file for new mjpeg files or run (in bash):
+sudo systemctl status spoolcam.service
+
+7. Safe shutdown note
+
+-Always stop recording before power removal run (in bash): sudo systemctl stop spoolcam.service 
