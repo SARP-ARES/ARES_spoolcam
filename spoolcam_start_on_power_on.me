@@ -33,6 +33,10 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 
+-Once pasted hit: CTRL + O -> Write Out, ENTER -> confirm filename, CTRL + X -> exit editor
+
+At this point, the service file exists, but systemd does not know about it yet.
+
 4. Enable & start the service
 -Run (in bash):
 sudo systemctl daemon-reload
