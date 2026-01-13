@@ -1,25 +1,28 @@
-import subprocess
-import sys
-import pathlib
+import cv2
+import glob
+import os
 
-if len(sys.argv) != 2:
-    print("Usage: python convert_mjpeg_to_mp4.py <folder>")
-    sys.exit(1)
+# Target framerate
+FPS = 30
 
-folder = pathlib.Path(sys.argv[1])
+for mjpeg_file in glob.glob("*.mjpeg"):
+    mp4_file = os.path.splitext(mjpeg_file)[0] + ".mp4"
 
-for mjpeg in folder.glob("*.mjpeg"):
-    mp4 = mjpeg.with_suffix(".mp4")
+    # Open the MJPEG file
+    cap = cv2.VideoCapture(mjpeg_file)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-framerate", "30",
-        "-i", str(mjpeg),
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        str(mp4)
-    ]
+    # Setup VideoWriter
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # MP4 codec
+    out = cv2.VideoWriter(mp4_file, fourcc, FPS, (width, height))
 
-    print(f"Converting {mjpeg.name} → {mp4.name}")
-    subprocess.run(cmd, check=True)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        out.write(frame)
+
+    cap.release()
+    out.release()
+    print(f"Converted {mjpeg_file} → {mp4_file}")
