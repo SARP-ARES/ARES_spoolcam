@@ -7,11 +7,13 @@ import os
 import time
 
 # ================= Configuration =================
-VIDEO_DIR = "./spoolvids"        # Saves in current folder; no permission issues
-RESOLUTION = (320, 240)       # Low resolution for max FPS
-SOFTWARE_TEST_MODE = True      # True = simulate GPIO trigger, False = use real GPIO
-TRIGGER_DURATION = 5           # seconds recording in software test mode
-WAIT_BETWEEN = 3               # seconds between simulated triggers
+VIDEO_DIR = "./spoolvids"          # Directory to save MJPEGs
+RESOLUTION = (320, 240)            # Low res for max FPS
+CHUNK_DURATION = 10 * 60           # seconds per MJPEG file (10 min)
+SOFTWARE_TEST_MODE = False          # True = simulate GPIO triggers
+TRIGGER_DURATION = 5                # seconds per simulated trigger
+WAIT_BETWEEN = 3                    # seconds between simulated triggers
+GPIO_PIN = 17                       # GPIO pin for real trigger
 # ================================================
 
 # Ensure save directory exists
@@ -21,22 +23,36 @@ os.makedirs(VIDEO_DIR, exist_ok=True)
 picam2 = Picamera2()
 video_config = picam2.create_video_configuration(main={"size": RESOLUTION}, buffer_count=4)
 picam2.configure(video_config)
+picam2.start()  # Start camera before recording
 
 # Recording state
 recording_lock = threading.Lock()
 recording = False
-encoder = MJPEGEncoder()  # MJPEG for high FPS
+encoder = None
+current_file_start_time = None
+
+# ================== Recording Functions ==================
+def get_new_filename():
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{VIDEO_DIR}/video_{timestamp}.mjpeg"
 
 def start_recording():
-    global recording
+    """Start recording a new MJPEG video."""
+    global recording, encoder, current_file_start_time
     with recording_lock:
         if recording:
             return
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{VIDEO_DIR}/video_{timestamp}.mjpeg"
-        picam2.start_recording(encoder, filename)
+        filename = get_new_filename()
+        encoder = MJPEGEncoder()  # NEW encoder per recording
+        try:
+            picam2.start_recording(encoder, filename)
+        except Exception as e:
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Failed to start recording: {e}")
+            return  # exit without setting recording = True
+        current_file_start_time = time.time()
         recording = True
-        print(f"Recording started: {filename}")
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Recording started: {filename}")
+        time.sleep(0.05)  # ensure first frame captured
 
 def stop_recording():
     global recording
@@ -45,12 +61,27 @@ def stop_recording():
             return
         picam2.stop_recording()
         recording = False
-        print("Recording stopped")
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Recording stopped")
+
+def check_chunk_duration():
+    """If recording exceeds CHUNK_DURATION, stop and start new file."""
+    global recording
+    while True:
+        time.sleep(1)
+        with recording_lock:
+            if recording and current_file_start_time is not None:
+                elapsed = time.time() - current_file_start_time
+                if elapsed >= CHUNK_DURATION:
+                    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Chunk duration reached. Splitting file...")
+                    stop_recording()
+                    start_recording()
 
 # ================== Main ==================
 if SOFTWARE_TEST_MODE:
     print("SOFTWARE TEST MODE: Simulating trigger...")
     try:
+        # Start chunk checker thread
+        threading.Thread(target=check_chunk_duration, daemon=True).start()
         while True:
             print("Simulating trigger HIGH")
             start_recording()
@@ -64,8 +95,11 @@ if SOFTWARE_TEST_MODE:
 else:
     # Real GPIO trigger mode
     from gpiozero import Button
-    GPIO_PIN = 17
-    trigger = Button(GPIO_PIN, pull_up=False)
+    trigger = Button(GPIO_PIN, pull_up=False, bounce_time=0.05)
     trigger.when_pressed = start_recording
     trigger.when_released = stop_recording
+    # Start chunk checker thread
+    threading.Thread(target=check_chunk_duration, daemon=True).start()
+    print(f"GPIO trigger mode enabled on pin {GPIO_PIN}. Waiting for triggers...")
     pause()
+
