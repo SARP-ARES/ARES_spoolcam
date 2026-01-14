@@ -1,5 +1,4 @@
 from picamera2 import Picamera2
-from picamera2.encoders import MJPEGEncoder
 from signal import pause
 import datetime
 import threading
@@ -7,99 +6,90 @@ import os
 import time
 
 # ================= Configuration =================
-VIDEO_DIR = "./spoolvids"          # Directory to save MJPEGs
-RESOLUTION = (320, 240)            # Low res for max FPS
-CHUNK_DURATION = 10 * 60           # seconds per MJPEG file (10 min)
-SOFTWARE_TEST_MODE = False          # True = simulate GPIO triggers
-TRIGGER_DURATION = 5                # seconds per simulated trigger
-WAIT_BETWEEN = 3                    # seconds between simulated triggers
-GPIO_PIN = 17                       # GPIO pin for real trigger
+BASE_DIR = "./spoolvids"
+RESOLUTION = (320, 240)
+CAPTURE_INTERVAL = 1 / 25      # 25 FPS
+CHUNK_DURATION = 10 * 60       # 10 minutes per folder
+SOFTWARE_TEST_MODE = False
+GPIO_PIN = 17
 # ================================================
 
-# Ensure save directory exists
-os.makedirs(VIDEO_DIR, exist_ok=True)
+os.makedirs(BASE_DIR, exist_ok=True)
 
-# Initialize camera
 picam2 = Picamera2()
-video_config = picam2.create_video_configuration(main={"size": RESOLUTION}, buffer_count=4)
-picam2.configure(video_config)
-picam2.start()  # Start camera before recording
+config = picam2.create_still_configuration(
+    main={"size": RESOLUTION},
+    buffer_count=4
+)
+picam2.configure(config)
+picam2.start()
 
-# Recording state
-recording_lock = threading.Lock()
 recording = False
-encoder = None
-current_file_start_time = None
+recording_lock = threading.Lock()
+current_chunk_start = None
+current_chunk_dir = None
 
-# ================== Recording Functions ==================
-def get_new_filename():
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{VIDEO_DIR}/video_{timestamp}.mjpeg"
+def new_chunk_dir():
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(BASE_DIR, f"chunk_{ts}")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 def start_recording():
-    """Start recording a new MJPEG video."""
-    global recording, encoder, current_file_start_time
+    global recording, current_chunk_start, current_chunk_dir
     with recording_lock:
         if recording:
             return
-        filename = get_new_filename()
-        encoder = MJPEGEncoder()  # NEW encoder per recording
-        try:
-            picam2.start_recording(encoder, filename)
-        except Exception as e:
-            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Failed to start recording: {e}")
-            return  # exit without setting recording = True
-        current_file_start_time = time.time()
+        current_chunk_dir = new_chunk_dir()
+        current_chunk_start = time.time()
         recording = True
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Recording started: {filename}")
-        time.sleep(0.05)  # ensure first frame captured
+        print(f"Recording started ? {current_chunk_dir}")
 
 def stop_recording():
     global recording
     with recording_lock:
         if not recording:
             return
-        picam2.stop_recording()
         recording = False
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Recording stopped")
+        print("Recording stopped")
 
-def check_chunk_duration():
-    """If recording exceeds CHUNK_DURATION, stop and start new file."""
-    global recording
+def capture_loop():
+    frame = 0
     while True:
-        time.sleep(1)
+        time.sleep(CAPTURE_INTERVAL)
         with recording_lock:
-            if recording and current_file_start_time is not None:
-                elapsed = time.time() - current_file_start_time
-                if elapsed >= CHUNK_DURATION:
-                    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Chunk duration reached. Splitting file...")
-                    stop_recording()
-                    start_recording()
+            if not recording:
+                continue
 
-# ================== Main ==================
-if SOFTWARE_TEST_MODE:
-    print("SOFTWARE TEST MODE: Simulating trigger...")
+            elapsed = time.time() - current_chunk_start
+            if elapsed >= CHUNK_DURATION:
+                print("Chunk duration reached ? rotating folder")
+                start_recording()
+
+            filename = os.path.join(
+                current_chunk_dir,
+                f"frame_{frame:06d}.jpg"
+            )
+            picam2.capture_file(filename)
+            frame += 1
+
+def software_test():
     try:
-        # Start chunk checker thread
-        threading.Thread(target=check_chunk_duration, daemon=True).start()
         while True:
-            print("Simulating trigger HIGH")
             start_recording()
-            time.sleep(TRIGGER_DURATION)
-            print("Simulating trigger LOW")
+            time.sleep(5)
             stop_recording()
-            time.sleep(WAIT_BETWEEN)
+            time.sleep(3)
     except KeyboardInterrupt:
-        print("Test stopped by user")
+        pass
 
+threading.Thread(target=capture_loop, daemon=True).start()
+
+if SOFTWARE_TEST_MODE:
+    software_test()
 else:
-    # Real GPIO trigger mode
     from gpiozero import Button
     trigger = Button(GPIO_PIN, pull_up=False, bounce_time=0.05)
     trigger.when_pressed = start_recording
     trigger.when_released = stop_recording
-    # Start chunk checker thread
-    threading.Thread(target=check_chunk_duration, daemon=True).start()
-    print(f"GPIO trigger mode enabled on pin {GPIO_PIN}. Waiting for triggers...")
     pause()
-
