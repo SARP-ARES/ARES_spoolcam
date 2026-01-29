@@ -9,7 +9,7 @@ from signal import pause
 # ================= Configuration =================
 IMAGE_DIR = "./spoolvids"
 RESOLUTION = (640, 480)
-CAPTURE_FPS = 20
+CAPTURE_FPS = 30
 GPIO_TRIGGER = 17
 GPIO_LED = 26
 # ================================================
