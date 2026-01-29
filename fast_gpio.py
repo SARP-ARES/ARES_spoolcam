@@ -1,95 +1,89 @@
 from picamera2 import Picamera2
-from signal import pause
-import datetime
+from gpiozero import Button, LED
 import threading
-import os
 import time
+import os
+import datetime
+from signal import pause
 
 # ================= Configuration =================
-BASE_DIR = "./spoolvids"
-RESOLUTION = (320, 240)
-CAPTURE_INTERVAL = 1 / 25      # 25 FPS
-CHUNK_DURATION = 10 * 60       # 10 minutes per folder
-SOFTWARE_TEST_MODE = False
-GPIO_PIN = 17
+IMAGE_DIR = "./spoolvids"
+RESOLUTION = (640, 480)
+CAPTURE_FPS = 20
+GPIO_TRIGGER = 17
+GPIO_LED = 26
 # ================================================
 
-os.makedirs(BASE_DIR, exist_ok=True)
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
 picam2 = Picamera2()
-config = picam2.create_still_configuration(
-    main={"size": RESOLUTION},
-    buffer_count=4
-)
+config = picam2.create_still_configuration(main={"size": RESOLUTION})
 picam2.configure(config)
 picam2.start()
 
+trigger = Button(GPIO_TRIGGER, pull_up=False)
+led = LED(GPIO_LED)
+
 recording = False
 recording_lock = threading.Lock()
-current_chunk_start = None
-current_chunk_dir = None
+frame_thread = None
+led_thread = None
+stop_event = threading.Event()
 
-def new_chunk_dir():
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(BASE_DIR, f"chunk_{ts}")
-    os.makedirs(path, exist_ok=True)
-    return path
+def led_blink_loop():
+    while not stop_event.is_set():
+        led.on()
+        time.sleep(0.5)
+        led.off()
+        time.sleep(0.5)
+    led.off()
+
+def capture_loop(folder):
+    frame = 0
+    interval = 1.0 / CAPTURE_FPS
+
+    while not stop_event.is_set():
+        filename = os.path.join(folder, f"frame_{frame:06d}.jpg")
+        picam2.capture_file(filename)
+        frame += 1
+        time.sleep(interval)
 
 def start_recording():
-    global recording, current_chunk_start, current_chunk_dir
+    global recording, frame_thread, led_thread
+
     with recording_lock:
         if recording:
             return
-        current_chunk_dir = new_chunk_dir()
-        current_chunk_start = time.time()
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = os.path.join(IMAGE_DIR, f"run_{timestamp}")
+        os.makedirs(folder, exist_ok=True)
+
+        stop_event.clear()
+
+        frame_thread = threading.Thread(target=capture_loop, args=(folder,), daemon=True)
+        led_thread = threading.Thread(target=led_blink_loop, daemon=True)
+
+        frame_thread.start()
+        led_thread.start()
+
         recording = True
-        print(f"Recording started ? {current_chunk_dir}")
+        print(f"Recording started: {folder}")
 
 def stop_recording():
     global recording
+
     with recording_lock:
         if not recording:
             return
+
+        stop_event.set()
+        time.sleep(0.2)  # allow threads to exit cleanly
         recording = False
         print("Recording stopped")
 
-def capture_loop():
-    frame = 0
-    while True:
-        time.sleep(CAPTURE_INTERVAL)
-        with recording_lock:
-            if not recording:
-                continue
+trigger.when_pressed = start_recording
+trigger.when_released = stop_recording
 
-            elapsed = time.time() - current_chunk_start
-            if elapsed >= CHUNK_DURATION:
-                print("Chunk duration reached ? rotating folder")
-                start_recording()
-
-            filename = os.path.join(
-                current_chunk_dir,
-                f"frame_{frame:06d}.jpg"
-            )
-            picam2.capture_file(filename)
-            frame += 1
-
-def software_test():
-    try:
-        while True:
-            start_recording()
-            time.sleep(5)
-            stop_recording()
-            time.sleep(3)
-    except KeyboardInterrupt:
-        pass
-
-threading.Thread(target=capture_loop, daemon=True).start()
-
-if SOFTWARE_TEST_MODE:
-    software_test()
-else:
-    from gpiozero import Button
-    trigger = Button(GPIO_PIN, pull_up=False, bounce_time=0.05)
-    trigger.when_pressed = start_recording
-    trigger.when_released = stop_recording
-    pause()
+print("System ready. Waiting for trigger...")
+pause()
