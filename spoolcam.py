@@ -25,37 +25,18 @@ def main():
     config = cam.create_video_configuration(main={'size': RESOLUTION, 
                                                   'format' :'YUV420'})
     cam.configure(config)
-    encoder = H264Encoder(bitrate=10000000)
 
     # GPIO SETUP
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(TRIGGER_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
     GPIO.setup(LED_PIN, GPIO.OUT)
-        
-    # Polls the trigger pin to verify if the trigger pin is still high
-    # sets teh recording event if high, clears if low 
-    def poll_GPIO():
-        while(True):
             
-            # Start video if video pin is high
-            if GPIO.input(TRIGGER_PIN):
-                recording.set()
-            else:
-                recording.clear()    
-
-            time.sleep(0.1) # Avoid Hammering
-    
-    # Threading overhead
-    recording = threading.Event()
-    started_vid = False
-    updater = threading.Thread(target=poll_GPIO, daemon=True)
-    updater.start()
-    
     try:
         # main loop
         while(True):
-
-            if recording.is_set():
+            
+            # if its high, start 
+            if GPIO.input(TRIGGER_PIN):
                 
                 # Start the video if needed
                 if not started_vid:
