@@ -1,7 +1,6 @@
 import os
 import RPi.GPIO as GPIO
 import time
-import threading
 from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder
 from picamera2.outputs import PyavOutput
@@ -25,8 +24,8 @@ def main():
     config = cam.create_video_configuration(main={'size': RESOLUTION, 
                                                   'format' :'YUV420'})
     cam.configure(config)
-    encoder = H264Encoder(bitrate=10000000)
-
+    cam.start()
+    
     # GPIO SETUP
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(TRIGGER_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
