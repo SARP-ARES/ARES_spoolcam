@@ -25,11 +25,14 @@ def main():
     config = cam.create_video_configuration(main={'size': RESOLUTION, 
                                                   'format' :'YUV420'})
     cam.configure(config)
+    encoder = H264Encoder(bitrate=10000000)
 
     # GPIO SETUP
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(TRIGGER_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
     GPIO.setup(LED_PIN, GPIO.OUT)
+
+    started_vid = False
             
     try:
         # main loop
